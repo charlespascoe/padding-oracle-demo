@@ -1,0 +1,25 @@
+{
+  "name": "padding-oracle-demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "demo": "ts-node index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cpascoe95/padding-oracle-demo.git"
+  },
+  "author": "Charles Pascoe",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cpascoe95/padding-oracle-demo/issues"
+  },
+  "homepage": "https://github.com/cpascoe95/padding-oracle-demo#readme",
+  "dependencies": {
+    "@types/node": "^10.12.21",
+    "ts-node": "^8.0.2",
+    "typescript": "^3.3.1"
+  }
+}
