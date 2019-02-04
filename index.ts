@@ -20,8 +20,8 @@ async function crack(ciphertext: Buffer, blocksizeBytes: number, paddingOracle: 
 
   const decryptedLastBlock: number[] = [];
 
-  for (let offset = 15; offset >= 0; offset--) {
-    const paddingValue = 16 - offset;
+  for (let offset = blocksizeBytes - 1; offset >= 0; offset--) {
+    const paddingValue = blocksizeBytes - offset;
 
     const testCiphertext = Buffer.concat([
       allButLastTwoBlocks,
