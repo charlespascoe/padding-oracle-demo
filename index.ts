@@ -81,6 +81,19 @@ async function crack(ciphertext: Buffer, blocksizeBytes: number, paddingOracle: 
 }
 
 
+function addPadding(data: Buffer, blocksize: number): Buffer {
+  const diff = blocksize - (data.length % blocksize);
+
+  const padding: number[] = [];
+
+  for (let i = 0; i < diff; i++) {
+    padding.push(diff);
+  }
+
+  return Buffer.concat([data, Buffer.from(padding)]);
+}
+
+
 function removePadding(data: Buffer): Buffer {
   const paddingLength = data[data.length - 1];
 
@@ -121,6 +134,24 @@ async function computeIv(firstCiphertextBlock: Buffer, firstPlaintextBlock: Buff
       testCiphertext[testIndex] = plaintextValue ^ test;
 
       if (await paddingOracle(testCiphertext)) {
+        if (offset === blockSize - 1) {
+          // Need to check for coincidental padding
+          // (e.g. second-to-last byte is 0x02, and
+          // we've just set the last byte to 0x02
+          // instead of 0x01 as we were expecting)
+
+          // Just flip a bit to see if it affects the result
+          testCiphertext[testIndex - 1] ^= 1;
+          const res = await paddingOracle(testCiphertext);
+          // Revert the change
+          testCiphertext[testIndex - 1] ^= 1;
+
+          if (!res) {
+            // We've found a coincidental padding value - continue instead
+            continue;
+          }
+        }
+
         decryptedIV.unshift(test ^ paddingValue);
         found = true;
         break;
@@ -137,10 +168,41 @@ async function computeIv(firstCiphertextBlock: Buffer, firstPlaintextBlock: Buff
 }
 
 
+async function encrypt(plaintext: Buffer, blocksize: number, paddingOracle: (ciphertext: Buffer) => Promise<boolean>): Promise<{iv: Buffer, ciphertext: Buffer}> {
+  const paddedPlaintext = addPadding(plaintext, blocksize);
+
+  const blocks = paddedPlaintext.length / blocksize;
+
+  let ciphertextBlock = randomBytes(blocksize);
+  const ciphertext = [];
+
+  for (let i = blocks - 1; i >= 0; i--) {
+    const plaintextBlock = paddedPlaintext.slice(i * blocksize, (i + 1) * blocksize);
+
+    const prevCiphertextBlock = await computeIv(ciphertextBlock, plaintextBlock, paddingOracle);
+
+    ciphertext.unshift(ciphertextBlock);
+    ciphertextBlock = prevCiphertextBlock;
+  }
+
+  return {
+    iv: ciphertextBlock,
+    ciphertext: Buffer.concat(ciphertext)
+  };
+}
+
+
 function aes256CbcEncrypt(key: Buffer, iv: Buffer, plaintext: Buffer): Buffer {
   const cipher = createCipheriv('aes-256-cbc', key, iv);
 
   return Buffer.concat([cipher.update(plaintext), cipher.final()]);
+}
+
+
+function aes256CbcDecrypt(key: Buffer, iv: Buffer, ciphertext: Buffer): Buffer {
+  const cipher = createDecipheriv('aes-256-cbc', key, iv);
+
+  return Buffer.concat([cipher.update(ciphertext), cipher.final()]);
 }
 
 
@@ -190,8 +252,19 @@ function aes256CbcEncrypt(key: Buffer, iv: Buffer, plaintext: Buffer): Buffer {
 
   console.log('  Plaintext:           ' + plaintext.toString());
   console.log('  Decrypted (with IV): ' + decryptedWithIv.toString());
+  console.log('');
 
   await paddingCollisionCheck();
+
+  console.log('Encrypting Arbitrary Data (with chosen IV)');
+
+  const plaintext3 = Buffer.from('This is a plaintext that an attacker has chosen. They do not need the key to encrypt it.');
+  const { iv: iv3, ciphertext: ciphertext3 } = await encrypt(plaintext3, 16, paddingOracle);
+  const decryptedPlaintext3 = aes256CbcDecrypt(key, iv3, ciphertext3);
+
+  console.log(`  Chosen plaintext:    ${plaintext3.toString()}`);
+  console.log(`  Decrypted plaintext: ${decryptedPlaintext3.toString()}`);
+  console.log('');
 
 })().catch(err => console.error(err));
 
