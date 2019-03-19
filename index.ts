@@ -41,6 +41,24 @@ async function crack(ciphertext: Buffer, blocksizeBytes: number, paddingOracle: 
       testCiphertext[testIndex] = originalValue ^ test;
 
       if (await paddingOracle(testCiphertext)) {
+        if (offset === blocksizeBytes - 1) {
+          // Need to check for coincidental padding
+          // (e.g. second-to-last byte is 0x02, and
+          // we've just set the last byte to 0x02
+          // instead of 0x01 as we were expecting)
+
+          // Just flip a bit to see if it affects the result
+          testCiphertext[testIndex - 1] ^= 1;
+          const res = await paddingOracle(testCiphertext);
+          // Revert the change
+          testCiphertext[testIndex - 1] ^= 1;
+
+          if (!res) {
+            // We've found a coincidental padding value - continue instead
+            continue;
+          }
+        }
+
         decryptedLastBlock.unshift(test ^ paddingValue);
         found = true;
         break;
@@ -173,4 +191,35 @@ function aes256CbcEncrypt(key: Buffer, iv: Buffer, plaintext: Buffer): Buffer {
   console.log('  Plaintext:           ' + plaintext.toString());
   console.log('  Decrypted (with IV): ' + decryptedWithIv.toString());
 
+  await paddingCollisionCheck();
+
 })().catch(err => console.error(err));
+
+
+async function paddingCollisionCheck() {
+  // This will get padded to have 0x01 at the end
+  const plaintext = Buffer.from([16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const key = randomBytes(32);
+  const iv = randomBytes(16);
+
+  const ciphertext = aes256CbcEncrypt(key, iv, plaintext);
+
+  const paddingOracle = async (testCiphertext: Buffer): Promise<boolean> => {
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+
+    decipher.update(testCiphertext);
+
+    try {
+      decipher.final();
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const cracked = await crack(Buffer.concat([iv, ciphertext]), 16, paddingOracle);
+
+  if (!plaintext.equals(removePadding(cracked))) {
+    throw new Error('Padding collision not working!');
+  }
+}
